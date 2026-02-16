@@ -1,0 +1,63 @@
+name: 日本株分析ボット
+
+on:
+  schedule:
+    # 東証取引時間中に5分間隔で実行（UTC = JST - 9時間）
+    # 前場: JST 9:00-11:30 = UTC 0:00-2:30
+    # 後場: JST 12:30-15:00 = UTC 3:30-6:00
+    - cron: '*/5 0-2 * * 1-5'   # 前場（月〜金）
+    - cron: '*/5 3-6 * * 1-5'   # 後場（月〜金）
+
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: '実行モード'
+        required: false
+        default: 'analysis'
+        type: choice
+        options:
+          - analysis
+          - summary
+
+jobs:
+  analyze:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt pytz
+
+      - name: Restore portfolio state
+        continue-on-error: true
+        run: |
+          git pull origin main --rebase || true
+
+      - name: Run analysis
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          DISCORD_BOT_TOKEN: ${{ secrets.DISCORD_BOT_TOKEN }}
+          DISCORD_CHANNEL_ID: ${{ secrets.DISCORD_CHANNEL_ID }}
+        run: |
+          if [ "${{ github.event.inputs.mode }}" = "summary" ]; then
+            python main.py --summary
+          else
+            python main.py --test --notify
+          fi
+
+      - name: Save state
+        continue-on-error: true
+        run: |
+          git config user.name "Stock Bot"
+          git config user.email "bot@stock-analyzer.local"
+          git add -A portfolio.json signal_history.json processed_messages.json 2>/dev/null || true
+          git diff --staged --quiet || git commit -m "📊 分析実行 $(date -u +%Y-%m-%dT%H:%M:%S)"
+          git push || true
