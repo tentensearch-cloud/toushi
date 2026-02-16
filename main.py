@@ -132,6 +132,15 @@ def run_analysis(notify: bool = True, force: bool = False):
     try:
         # 1. Discordチャンネルの取引メッセージを先に処理
         process_discord_chat_trades()
+        
+        # 1.5 ニュース監視（随時実行）
+        try:
+            from news_monitor import process_news
+            # テストモードならニュースもテスト
+            is_test = "--test" in sys.argv
+            process_news(test_mode=is_test)
+        except Exception as e:
+            logger.error(f"ニュース監視エラー: {e}")
 
         # 2. ポートフォリオ状況取得
         portfolio_summary = get_portfolio_summary()
@@ -293,13 +302,29 @@ def main():
         run_analysis(notify=args.notify, force=True)
         return
 
-    # 通常モード: 取引時間チェック
-    if not is_market_open():
-        logger.info("取引時間外です。スキップします。")
-        return
-
-    # 通常分析実行
-    run_analysis(notify=True)
+    # ニュース監視モード（時間外も動作）
+    # 通常モードでもニュース監視は行われるが、時間外にニュースだけ見たい場合のパス
+    # 今回の実装では run_analysis 内でニュースを見るようにしたので、
+    # is_market_open() の外で run_analysis を呼ぶ必要があるか？
+    # ユーザー要望: "東証取引時間外は...随時通知してください"
+    
+    market_open = is_market_open()
+    
+    if market_open:
+        # 取引時間中: フル分析 + ニュース
+        run_analysis(notify=True)
+    else:
+        # 取引時間外: ニュース監視のみ + 取引メッセージ処理のみ
+        # ただし run_analysis はスクリーニングも含む重い処理。
+        # ニュースだけ実行する専用パスを作るべき。
+        
+        logger.info("取引時間外: ニュース監視とチャット取引のみ実行")
+        try:
+            process_discord_chat_trades()
+            from news_monitor import process_news
+            process_news(test_mode=False)
+        except Exception as e:
+            logger.error(f"時間外処理エラー: {e}")
 
 
 if __name__ == "__main__":
