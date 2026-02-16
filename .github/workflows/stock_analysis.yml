@@ -14,6 +14,12 @@ on:
     # 土日（終日）: 15分間隔
     - cron: '*/15 * * * 0,6'
 
+  # プッシュ時にも実行（テスト・デバッグ用）
+  push:
+    branches:
+      - main
+
+
   workflow_dispatch:
     inputs:
       mode:
