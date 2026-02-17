@@ -86,15 +86,16 @@ def _format_signal_reasons_short(result: dict) -> str:
     return " | ".join(parts) if parts else "総合スコア"
 
 
-def send_analysis_report(screening_result: dict, portfolio_summary: dict) -> bool:
+def send_analysis_report(screening_result: dict, event_result: list, portfolio_summary: dict) -> bool:
     """
     メイン分析レポートを送信
     - ポートフォリオ状況
-    - 保有銘柄
-    - 買い候補TOP10（S株/100株・株価付き）
+    - 買い候補TOP5（テクニカル）
+    - 期待株TOP5（イベント分析）
     """
     summary = screening_result.get("summary", {})
-    top_candidates = screening_result.get("top_candidates", [])
+    # テクニカル分析はTOP5まで
+    technical_candidates = screening_result.get("top_candidates", [])[:5]
 
     embeds = []
 
@@ -129,61 +130,71 @@ def send_analysis_report(screening_result: dict, portfolio_summary: dict) -> boo
     }
     embeds.append(portfolio_embed)
 
-    # ===== 買い候補TOP10 Embed =====
-    if top_candidates:
+    # ===== テクニカルTOP5 Embed =====
+    if technical_candidates:
         candidates_lines = []
-        for i, c in enumerate(top_candidates, 1):
+        for i, c in enumerate(technical_candidates, 1):
             name = c.get("name", c.get("ticker", "?"))
             ticker = c.get("ticker", "?")
             price = c.get("current_price", 0)
             score = c.get("score", 0)
             method = c.get("method", "?")
-            shares = c.get("shares", 0)
             est_cost = c.get("estimated_cost", 0)
-            oco = c.get("oco", {})
             reasons = _format_signal_reasons_short(c)
-
-            # 購入方法アイコン
             method_icon = "📦" if "単元" in method else "🔹"
 
             candidates_lines.append(
-                f"**{i}. {name}**（{ticker}）\n"
-                f"　💹 株価: **¥{price:,.0f}** | スコア: {score:+.4f}\n"
-                f"　{method_icon} {method} → {shares}株 = ¥{est_cost:,.0f}\n"
-                f"　🎯 利確: ¥{oco.get('take_profit', 0):,.0f}（+{oco.get('take_profit_pct', 5)}%） | "
-                f"🛑 損切: ¥{oco.get('stop_loss', 0):,.0f}（-{oco.get('stop_loss_pct', 3)}%）\n"
+                f"**{i}. {name} ({ticker})**\n"
+                f"　Current: ¥{price:,.0f} | Score: {score:+.4f}\n"
+                f"　{method_icon} {method} (¥{est_cost:,.0f})\n"
                 f"　📊 {reasons}"
             )
 
-        # Discordのembed field valueは1024文字制限。分割する。
-        # 5銘柄ずつ2つのEmbedに分割
-        half = 5
-        first_half = "\n\n".join(candidates_lines[:half])
-        second_half = "\n\n".join(candidates_lines[half:])
-
-        buy_embed_1 = {
-            "title": f"🏆 買い候補 TOP 1〜5（{summary.get('data_available', 0)}銘柄分析）",
-            "description": first_half[:4096],
+        buy_embed = {
+            "title": f"📈 テクニカル有望株 TOP5 ({summary.get('data_available', 0)}銘柄中)",
+            "description": "\n\n".join(candidates_lines),
             "color": COLOR_BUY,
         }
-        embeds.append(buy_embed_1)
-
-        if second_half:
-            buy_embed_2 = {
-                "title": f"🏆 買い候補 TOP 6〜10",
-                "description": second_half[:4096],
-                "color": COLOR_BUY,
-                "footer": {"text": f"利用可能残高: ¥{summary.get('available_cash', 0):,.0f} | {FOOTER_TEXT}"},
-                "timestamp": datetime.utcnow().isoformat(),
-            }
-            embeds.append(buy_embed_2)
+        embeds.append(buy_embed)
     else:
-        no_candidates_embed = {
-            "title": "📋 買い候補",
-            "description": "現在、条件を満たす買い候補はありません。",
+        no_tech_embed = {
+            "title": "📈 テクニカル有望株",
+            "description": "現在、テクニカル分析で強い買いシグナルが出ている銘柄はありません。",
             "color": COLOR_SUMMARY,
         }
-        embeds.append(no_candidates_embed)
+        embeds.append(no_tech_embed)
+
+    # ===== イベント期待株TOP5 Embed =====
+    if event_result:
+        event_lines = []
+        for i, e in enumerate(event_result[:5], 1): # TOP5
+            name = e.get("name", "?")
+            ticker = e.get("ticker", "?")
+            reason = e.get("reason", "詳細不明")
+            # score = e.get("score", "?") # 表示しないか、必要なら追加
+
+            event_lines.append(
+                f"**{i}. {name} ({ticker})**\n"
+                f"　💡 {reason}"
+            )
+        
+        event_embed = {
+            "title": "✨ 直近の期待材料アリ企業 (Gemini分析)",
+            "description": "\n\n".join(event_lines),
+            "color": 0xFF00FF, # Magenta
+            "footer": {"text": "※ニュース分析結果は1時間キャッシュされます"},
+            "timestamp": datetime.utcnow().isoformat(),
+        }
+        embeds.append(event_embed)
+    else:
+        # イベントなしの場合は特に表示しないか、「特になし」を表示するか。
+        # ユーザーは「教えてください」と言っているので、「不明」を表示する。
+        no_event_embed = {
+            "title": "✨ 期待材料アリ企業",
+            "description": "現在、特筆すべき期待材料は見つかりませんでした（または分析エラー）。",
+            "color": COLOR_SUMMARY,
+        }
+        embeds.append(no_event_embed)
 
     return _send_webhook(embeds)
 
