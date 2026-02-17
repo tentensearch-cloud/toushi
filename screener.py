@@ -7,7 +7,7 @@ import os
 import logging
 from datetime import datetime, timedelta
 from config import WATCHLIST, SIGNAL_PARAMS, RISK_PARAMS, SIGNAL_HISTORY_FILE
-from data_fetcher import fetch_daily_data
+from data_fetcher import fetch_daily_data_batch
 from analyzer import analyze_stock
 from portfolio import get_available_cash, get_holdings, calculate_recommended_shares
 
@@ -126,11 +126,14 @@ def screen_all_stocks() -> dict:
 
     logger.info(f"スクリーニング開始: {len(WATCHLIST)}銘柄, 利用可能残高: ¥{available_cash:,.0f}")
 
+    # 一括データ取得（高速化・API制限対策）
+    all_stock_data = fetch_daily_data_batch()
+
     for ticker, name in WATCHLIST.items():
         try:
-            df = fetch_daily_data(ticker)
+            df = all_stock_data.get(ticker)
             if df is None or df.empty:
-                logger.warning(f"[{ticker}] {name}: データ取得失敗、スキップ")
+                # logger.warning(f"[{ticker}] {name}: データ取得失敗、スキップ") # ログ多すぎるので省略
                 continue
 
             result = analyze_stock(df)
